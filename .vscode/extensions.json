@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "dbaeumer.vscode-typescript-next"
+  ],
+  "github.copilot.chat.commitMessageGeneration.instructions": [
+    {
+      "text": "Escreva mensagens de commit detalhadas e bem organizadas, iniciando obrigatoriamente pelo tipo de commit seguindo os padrões do repositório iuricode/padroes-de-commits (ex: feat, fix, refactor, style, test, docs). Resuma claramente o propósito da alteração e descreva o impacto no código. Cite módulos ou arquivos afetados somente quando relevante, ignorando completamente quaisquer alterações em caminhos que correspondam ao padrão .*/vendor/.*. Use linguagem profissional e objetiva, sem emojis ou abreviações. Sempre em português do Brasil. Seja breve. Ao final da mensagem, adicione o identificador da task no formato #NNNN.\n\nCOMO EXTRAIR O TASK ID DA BRANCH:\nO nome da branch segue o padrão: [projeto]/[ano]/[mes]/[TASK_ID]...\n- O TASK ID é o número que vem APÓS a terceira barra (/)\n- Exemplo 1: 'jaja/26/03/345562-etapa-produtos-200226' → task ID é 345562\n- Exemplo 2: 'feat/26/03/341961' → task ID é 341961\n- Adicione ao final do commit: #345562 ou #341961\n\nUse como referência: https://www.conventionalcommits.org/en/v1.0.0/"
+    }
+  ]
+}

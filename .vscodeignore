@@ -1,0 +1,39 @@
+# Source files
+src/
+*.ts
+*.map
+
+# VS Code files
+.vscode/
+.vscode-test/
+
+# Git files
+.git/
+.gitignore
+
+# Dependencies
+node_modules/
+
+# Build artifacts
+*.vsix
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test files
+**/*.test.ts
+**/*.spec.ts
+coverage/
+
+# Documentation (keep in source, not in package)
+SCRIPTS.md
+*.md
+!README.md
+
+# Scripts (development only)
+scripts/
+release.bat
