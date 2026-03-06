@@ -12,7 +12,12 @@
     let entriesByUri = new Map();
     let activeFileUri;
     let activeFilePath;
+    let compareSourceUri;
     let searchSelectionIndex = -1;
+
+    const contextMenu = document.createElement('div');
+    contextMenu.className = 'context-menu hidden';
+    document.body.appendChild(contextMenu);
 
     // Notify extension that webview is ready
     vscode.postMessage({ type: 'ready' });
@@ -76,9 +81,21 @@
         searchInput.value = '';
         clearTimeout(searchTimeout);
         updateClearButtonVisibility();
+        hideContextMenu();
         displayTreeView(fileTree);
         searchInput.focus();
     });
+
+    document.addEventListener('click', (event) => {
+        if (!contextMenu.contains(event.target)) {
+            hideContextMenu();
+        }
+    });
+
+    window.addEventListener('blur', hideContextMenu);
+    window.addEventListener('resize', hideContextMenu);
+    resultsContainer.addEventListener('scroll', hideContextMenu, { passive: true });
+    searchInput.addEventListener('focus', hideContextMenu);
 
     // Handle messages from extension
     window.addEventListener('message', (event) => {
@@ -97,6 +114,9 @@
                 activeFileUri = message.uri;
                 activeFilePath = getEntryPathByUri(activeFileUri);
                 syncActiveFileSelection(true);
+                break;
+            case 'compareSourceChanged':
+                compareSourceUri = message.uri;
                 break;
             case 'focusSearch':
                 searchInput.focus();
@@ -192,7 +212,7 @@
 
             if (node.type === 'folder') {
                 return `
-                    <div class="tree-item folder" data-path="${node.path}" data-type="folder" style="padding-left: ${paddingLeft}px">
+                    <div class="tree-item folder" data-path="${node.path}" data-uri="${node.uri}" data-type="folder" style="padding-left: ${paddingLeft}px">
                         <span class="tree-collapse-icon">▶</span>
                         <div class="tree-icon">${iconSvg}</div>
                         <span class="tree-label">${escapeHtml(node.name)}</span>
@@ -214,6 +234,8 @@
     }
 
     function attachTreeClickHandlers() {
+        attachContextMenuHandlers(document.querySelectorAll('.tree-item'));
+
         // Folder click handlers
         document.querySelectorAll('.tree-item.folder').forEach(item => {
             item.addEventListener('click', (e) => {
@@ -308,7 +330,134 @@
             });
         });
 
+        attachContextMenuHandlers(resultItems);
+
         syncActiveFileSelection(false);
+    }
+
+    function showContextMenu(entry, clientX, clientY) {
+        const groups = buildContextMenuGroups(entry);
+        const html = groups.map(group => {
+            const buttons = group.map(item => {
+                const disabled = item.disabled ? 'disabled' : '';
+                return `<button class="context-menu-item" type="button" data-action="${item.action}" ${disabled}>${escapeHtml(item.label)}</button>`;
+            }).join('');
+
+            return `<div class="context-menu-group">${buttons}</div>`;
+        }).join('');
+
+        contextMenu.innerHTML = html;
+        contextMenu.classList.remove('hidden');
+        positionContextMenu(clientX, clientY);
+
+        contextMenu.querySelectorAll('.context-menu-item').forEach(button => {
+            button.addEventListener('click', () => {
+                const action = button.dataset.action;
+                hideContextMenu();
+
+                if (!action || button.disabled) {
+                    return;
+                }
+
+                vscode.postMessage({
+                    type: 'contextAction',
+                    action,
+                    uri: entry.uri,
+                    path: entry.path,
+                    entryType: entry.type
+                });
+            });
+        });
+    }
+
+    function buildContextMenuGroups(entry) {
+        const isFile = entry.type === 'file';
+        const hasCompareSource = Boolean(compareSourceUri);
+        const canCompare = isFile && hasCompareSource && normalizeUriKey(compareSourceUri) !== normalizeUriKey(entry.uri);
+
+        const groups = [];
+
+        if (isFile) {
+            groups.push([
+                { action: 'open', label: 'Open' },
+                { action: 'openToSide', label: 'Open to the Side' }
+            ]);
+        }
+
+        groups.push([
+            { action: 'revealInOs', label: 'Reveal in File Explorer' },
+            { action: 'revealInExplorer', label: 'Reveal in Explorer' },
+            { action: 'openInTerminal', label: 'Open in Integrated Terminal' }
+        ]);
+
+        if (isFile) {
+            groups.push([
+                { action: 'selectForCompare', label: 'Select for Compare' },
+                { action: 'compareWithSelected', label: 'Compare with Selected', disabled: !canCompare },
+                { action: 'clearCompareSelection', label: 'Clear Compare Selection', disabled: !hasCompareSource }
+            ]);
+        }
+
+        groups.push([
+            { action: 'copyPath', label: 'Copy Path' },
+            { action: 'copyRelativePath', label: 'Copy Relative Path' }
+        ]);
+
+        groups.push([
+            { action: 'rename', label: 'Rename...' },
+            { action: 'duplicate', label: 'Duplicate' },
+            { action: 'delete', label: 'Delete' }
+        ]);
+
+        return groups;
+    }
+
+    function positionContextMenu(clientX, clientY) {
+        const margin = 8;
+        const menuRect = contextMenu.getBoundingClientRect();
+        const maxLeft = window.innerWidth - menuRect.width - margin;
+        const maxTop = window.innerHeight - menuRect.height - margin;
+        const left = Math.max(margin, Math.min(clientX, maxLeft));
+        const top = Math.max(margin, Math.min(clientY, maxTop));
+
+        contextMenu.style.left = `${left}px`;
+        contextMenu.style.top = `${top}px`;
+    }
+
+    function hideContextMenu() {
+        contextMenu.classList.add('hidden');
+        contextMenu.innerHTML = '';
+    }
+
+    function attachContextMenuHandlers(items) {
+        items.forEach(item => {
+            item.addEventListener('contextmenu', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+
+                const entry = getEntryFromElement(item);
+                if (!entry || !entry.uri) {
+                    return;
+                }
+
+                showContextMenu(entry, event.clientX, event.clientY);
+            });
+        });
+    }
+
+    function getEntryFromElement(item) {
+        const id = item.dataset.id;
+        const type = item.dataset.type;
+        const uri = item.dataset.uri;
+        const entry = id ? entriesById.get(id) : entriesByUri.get(normalizeUriKey(uri));
+
+        return {
+            id,
+            type,
+            uri,
+            path: item.dataset.path || entry?.path || getEntryPathByUri(uri),
+            name: entry?.name || item.querySelector('.tree-label, .file-name')?.textContent || ''
+        };
     }
 
     function syncActiveFileSelection(shouldScroll) {

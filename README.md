@@ -8,6 +8,7 @@ Uma extensão do VS Code que exibe os arquivos do workspace com uma busca integr
 - ✅ **Busca Integrada** - Filtra apenas por nomes de arquivos/pastas (não busca conteúdo)
 - ✅ **Busca em Tempo Real** - Resultados atualizados enquanto você digita
 - ✅ **Double-click** para abrir arquivos no editor
+- ✅ **Menu de Contexto** - Clique com o botão direito para abrir, copiar caminho, terminal, renomear, duplicar, deletar e comparar arquivos
 - ✅ **Ícones** para diferentes tipos de arquivo
 - ✅ **Filtro Automático** - Ignora `.git`, `node_modules`, `.vscode`, etc.
 - ✅ **Suporte a .gitignore** - Respeita as regras do seu arquivo .gitignore
@@ -46,6 +47,7 @@ code --install-extension jfilebrowser-*.vsix
 2. Digite o nome do arquivo ou pasta que procura
 3. A árvore será filtrada em tempo real mostrando apenas resultados correspondentes
 4. Double-click em um arquivo para abri-lo no editor
+5. Clique com o botão direito em um arquivo ou pasta para abrir o menu de contexto
 
 ## 📂 Estrutura do Projeto
 

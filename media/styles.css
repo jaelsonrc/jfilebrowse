@@ -90,6 +90,51 @@ body {
     max-height: calc(100vh - 60px);
 }
 
+.context-menu {
+    position: fixed;
+    min-width: 220px;
+    max-width: 280px;
+    background: var(--vscode-menu-background);
+    color: var(--vscode-menu-foreground);
+    border: 1px solid var(--vscode-menu-border, var(--vscode-contrastBorder));
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    border-radius: 6px;
+    padding: 6px;
+    z-index: 1000;
+}
+
+.context-menu.hidden {
+    display: none;
+}
+
+.context-menu-group + .context-menu-group {
+    border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-sideBar-border));
+    margin-top: 6px;
+    padding-top: 6px;
+}
+
+.context-menu-item {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    padding: 7px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font: inherit;
+}
+
+.context-menu-item:hover:not(:disabled) {
+    background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+    color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+}
+
+.context-menu-item:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
 /* List View Styles */
 .file-item,
 .folder-item {
@@ -243,6 +288,12 @@ body {
 .tree-item.active-file {
     background-color: var(--vscode-list-activeSelectionBackground);
     color: var(--vscode-list-activeSelectionForeground);
+}
+
+.tree-item.active-file:hover,
+.file-item.active-file:hover,
+.folder-item.active-file:hover {
+    background-color: var(--vscode-list-activeSelectionBackground);
 }
 
 .tree-item.file {

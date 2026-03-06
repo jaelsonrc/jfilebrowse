@@ -25,6 +25,7 @@ export class JFileBrowserProvider implements vscode.WebviewViewProvider {
 
     private _view?: vscode.WebviewView;
     private _pendingFocusSearch = false;
+    private _compareSourceUri?: vscode.Uri;
     private gitignoreParser: GitignoreParser;
     private _entryIdCounter = 0;
     private _activeEditorListener?: vscode.Disposable;
@@ -51,6 +52,9 @@ export class JFileBrowserProvider implements vscode.WebviewViewProvider {
             switch (data.type) {
                 case 'openFile':
                     await this.openFile(data.uri);
+                    break;
+                case 'contextAction':
+                    await this.handleContextAction(data);
                     break;
                 case 'ready':
                     await this.loadAllFiles();
@@ -94,9 +98,76 @@ export class JFileBrowserProvider implements vscode.WebviewViewProvider {
                 flatFiles: flatEntries
             });
 
+            this.postCompareSourceState();
             this.postActiveFile(vscode.window.activeTextEditor);
         } catch (error) {
             console.error('Error loading files:', error);
+        }
+    }
+
+    private async handleContextAction(data: {
+        action?: string;
+        uri?: string;
+        path?: string;
+        entryType?: 'file' | 'folder';
+    }) {
+        if (!data.action || !data.uri || !data.entryType) {
+            return;
+        }
+
+        const targetUri = vscode.Uri.parse(data.uri);
+
+        try {
+            switch (data.action) {
+                case 'open':
+                    await this.openUri(targetUri);
+                    break;
+                case 'openToSide':
+                    await this.openUri(targetUri, vscode.ViewColumn.Beside);
+                    break;
+                case 'revealInOs':
+                    await this.revealInOs(targetUri);
+                    break;
+                case 'revealInExplorer':
+                    await vscode.commands.executeCommand('revealInExplorer', targetUri);
+                    break;
+                case 'openInTerminal':
+                    this.openInTerminal(targetUri, data.entryType);
+                    break;
+                case 'copyPath':
+                    await vscode.env.clipboard.writeText(targetUri.fsPath);
+                    break;
+                case 'copyRelativePath':
+                    await vscode.env.clipboard.writeText(data.path || this.getRelativePath(targetUri));
+                    break;
+                case 'rename':
+                    await this.renameEntry(targetUri);
+                    await this.loadAllFiles();
+                    break;
+                case 'duplicate':
+                    await this.duplicateEntry(targetUri, data.entryType);
+                    await this.loadAllFiles();
+                    break;
+                case 'delete':
+                    await this.deleteEntry(targetUri, data.entryType);
+                    await this.loadAllFiles();
+                    break;
+                case 'selectForCompare':
+                    this._compareSourceUri = targetUri;
+                    this.postCompareSourceState();
+                    vscode.window.setStatusBarMessage(`Selected for compare: ${path.basename(targetUri.fsPath)}`, 2500);
+                    break;
+                case 'compareWithSelected':
+                    await this.compareWithSelected(targetUri);
+                    break;
+                case 'clearCompareSelection':
+                    this._compareSourceUri = undefined;
+                    this.postCompareSourceState();
+                    break;
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`JFileBrowser: ${message}`);
         }
     }
 
@@ -122,6 +193,13 @@ export class JFileBrowserProvider implements vscode.WebviewViewProvider {
         this._view?.webview.postMessage({
             type: 'activeFileChanged',
             uri: uri.toString()
+        });
+    }
+
+    private postCompareSourceState() {
+        this._view?.webview.postMessage({
+            type: 'compareSourceChanged',
+            uri: this._compareSourceUri?.toString()
         });
     }
 
@@ -228,6 +306,161 @@ export class JFileBrowserProvider implements vscode.WebviewViewProvider {
             this._view.show(false);
             this._view.webview.postMessage({ type: 'focusSearch' });
             this._pendingFocusSearch = false;
+        }
+    }
+
+    private async openUri(uri: vscode.Uri, viewColumn?: vscode.ViewColumn) {
+        const stat = await vscode.workspace.fs.stat(uri);
+
+        if (stat.type === vscode.FileType.Directory) {
+            await vscode.commands.executeCommand('revealInExplorer', uri);
+            return;
+        }
+
+        const document = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(document, {
+            preview: false,
+            viewColumn
+        });
+    }
+
+    private async revealInOs(uri: vscode.Uri) {
+        try {
+            await vscode.commands.executeCommand('revealFileInOS', uri);
+        } catch {
+            const target = await vscode.workspace.fs.stat(uri).then(stat =>
+                stat.type === vscode.FileType.Directory ? uri : vscode.Uri.file(path.dirname(uri.fsPath))
+            );
+            await vscode.env.openExternal(target);
+        }
+    }
+
+    private openInTerminal(uri: vscode.Uri, entryType: 'file' | 'folder') {
+        const cwd = entryType === 'folder' ? uri.fsPath : path.dirname(uri.fsPath);
+        const terminal = vscode.window.createTerminal({
+            name: `JFileBrowser: ${path.basename(cwd) || cwd}`,
+            cwd
+        });
+
+        terminal.show();
+    }
+
+    private async renameEntry(uri: vscode.Uri) {
+        const currentName = path.basename(uri.fsPath);
+        const parentUri = vscode.Uri.file(path.dirname(uri.fsPath));
+
+        const nextName = await vscode.window.showInputBox({
+            title: 'Rename',
+            prompt: 'Enter a new name',
+            value: currentName,
+            validateInput: (value) => {
+                if (!value.trim()) {
+                    return 'Name is required.';
+                }
+
+                if (/[\\/]/.test(value)) {
+                    return 'Name cannot contain path separators.';
+                }
+
+                return undefined;
+            }
+        });
+
+        if (!nextName || nextName === currentName) {
+            return;
+        }
+
+        const targetUri = vscode.Uri.joinPath(parentUri, nextName);
+        if (await this.uriExists(targetUri)) {
+            throw new Error(`'${nextName}' already exists.`);
+        }
+
+        await vscode.workspace.fs.rename(uri, targetUri, { overwrite: false });
+    }
+
+    private async duplicateEntry(uri: vscode.Uri, entryType: 'file' | 'folder') {
+        const parentUri = vscode.Uri.file(path.dirname(uri.fsPath));
+        const originalName = path.basename(uri.fsPath);
+        const targetUri = await this.createUniqueDuplicateUri(parentUri, originalName, entryType);
+
+        await vscode.workspace.fs.copy(uri, targetUri, { overwrite: false });
+    }
+
+    private async deleteEntry(uri: vscode.Uri, entryType: 'file' | 'folder') {
+        const label = path.basename(uri.fsPath);
+        const detail = entryType === 'folder'
+            ? 'The folder will be moved to the recycle bin when available.'
+            : 'The file will be moved to the recycle bin when available.';
+        const confirmed = await vscode.window.showWarningMessage(
+            `Delete '${label}'?`,
+            {
+                modal: true,
+                detail
+            },
+            'Delete'
+        );
+
+        if (confirmed !== 'Delete') {
+            return;
+        }
+
+        try {
+            await vscode.workspace.fs.delete(uri, {
+                recursive: entryType === 'folder',
+                useTrash: true
+            });
+        } catch {
+            await vscode.workspace.fs.delete(uri, {
+                recursive: entryType === 'folder',
+                useTrash: false
+            });
+        }
+    }
+
+    private async compareWithSelected(targetUri: vscode.Uri) {
+        if (!this._compareSourceUri) {
+            vscode.window.showWarningMessage('Select a file for compare first.');
+            return;
+        }
+
+        if (this._compareSourceUri.toString() === targetUri.toString()) {
+            vscode.window.showWarningMessage('Select a different file to compare.');
+            return;
+        }
+
+        const left = this._compareSourceUri;
+        const title = `${path.basename(left.fsPath)} ↔ ${path.basename(targetUri.fsPath)}`;
+        await vscode.commands.executeCommand('vscode.diff', left, targetUri, title);
+    }
+
+    private async createUniqueDuplicateUri(
+        parentUri: vscode.Uri,
+        originalName: string,
+        entryType: 'file' | 'folder'
+    ): Promise<vscode.Uri> {
+        const parsed = path.parse(originalName);
+        const baseName = entryType === 'folder' ? originalName : parsed.name;
+        const extension = entryType === 'folder' ? '' : parsed.ext;
+
+        for (let index = 0; index < 1000; index++) {
+            const suffix = index === 0 ? ' copy' : ` copy ${index + 1}`;
+            const candidateName = `${baseName}${suffix}${extension}`;
+            const candidateUri = vscode.Uri.joinPath(parentUri, candidateName);
+
+            if (!(await this.uriExists(candidateUri))) {
+                return candidateUri;
+            }
+        }
+
+        throw new Error('Could not generate a duplicate name.');
+    }
+
+    private async uriExists(uri: vscode.Uri): Promise<boolean> {
+        try {
+            await vscode.workspace.fs.stat(uri);
+            return true;
+        } catch {
+            return false;
         }
     }
 
